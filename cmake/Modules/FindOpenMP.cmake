@@ -271,6 +271,18 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       mark_as_advanced(OpenMP_libomp_LIBRARY)
     endif()
 
+    # If OpenBLAS is linked against libgomp and with
+    #"omp gomp iomp5" search order , we may end up
+    # with multiple omp runtimes in libtorch_cpu.so
+    if(OpenBLAS_LIB AND OPENBLAS_USES_LIBGOMP)
+      find_library(OpenMP_libomp_LIBRARY
+        NAMES gomp omp iomp5
+	HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+	DOC "libomp location for OpenMP"
+      )
+      mark_as_advanced(OpenMP_libomp_LIBRARY)
+    endif()
+
     if (NOT OpenMP_libomp_LIBRARY)
       find_library(OpenMP_libomp_LIBRARY
         NAMES omp gomp iomp5
