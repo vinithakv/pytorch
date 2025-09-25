@@ -941,3 +941,96 @@ for to_dtype in (False, True):
         pass_dict=pass_patterns[1],
         extra_check=_other_is_broadcasted_in_dim,
     )(div_softmax_pattern)
+
+def scatter_upon_const_tensor_extra_check(match: Match):
+    """
+    Extra check for scatter upon const tensor pattern.
+    This pattern matches a special usage of scatter:
+    1. It's applied to a constant tensor
+    2. The index tensor has size 1 in the scatter dimension
+    Such pattern generates a sparse matrix when the const tensor is all-zero.
+    We can lower this pattern to a pointwise kernel for more fusion opportunities
+    and saving memory footprint.
+    """
+    if not config.optimize_scatter_upon_const_tensor:
+        return False
+
+    full_shape = match.kwargs["shape"]
+    selector = match.kwargs["selector"]
+    dim = match.kwargs["dim"]
+
+    if dim < 0:
+        dim += len(full_shape)
+
+    selector_ft = selector.meta["val"]
+    assert selector_ft.dim() == len(full_shape)
+
+    for idx, select_sz, full_sz in zip(
+        itertools.count(), selector_ft.shape, full_shape
+    ):
+        if idx == dim:
+            continue
+
+        # TODO: the pattern can be updated to support the case that index tensor
+        # is shorter. But that will need a more complex condition expression
+        # especially for multi-dimensional tensors.
+        # Skip it for now.
+        if isinstance(full_sz, torch.fx.Node):
+            full_sz = full_sz.meta["val"]
+        if select_sz < full_sz:
+            return False
+
+    # Actually we can support small size larger than 1. It would be a bit
+    # tedious. E.g., we load all the index values (not many) and compare
+    # them with the position in tensor to decide what value to return.
+    return selector_ft.size(dim) == 1
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.scatter.value,
+        CallFunction(
+            aten.full.default,
+            KeywordArg("shape"),
+            KeywordArg("background_val"),
+            dtype=KeywordArg("dtype"),
+        ),
+        KeywordArg("dim"),
+        KeywordArg("selector"),
+        KeywordArg("val"),  # scalar value
+    ),
+    pass_dict=patterns,
+    extra_check=scatter_upon_const_tensor_extra_check,
+)
+def scatter_upon_const_tensor_joint(
+    match: Match, shape, background_val, dtype, dim, selector, val
+):
+    """
+    Match the pattern of full+scatter into a pointwise operation in joint graph.
+
+    This converts:
+        torch.full(shape, background_val).scatter_(dim, selector, val)
+    Into a more efficient pointwise operation that can be fused with other operations.
+
+    TODO: Right now the scatter value must be a scalar. But we could support it
+    when it is a tensor as well.
+    """
+    from torch._inductor import metrics
+
+    metrics.num_matches_for_scatter_upon_const_tensor += 1
+
+    # Create a replacement that uses torch.where for the pointwise operation
+    def repl_fn(shape, background_val, dim, selector, val):
+        if dim < 0:
+            dim += len(shape)
+
+        # 2D and dim==1
+        M, N = shape
+        cols = torch.arange(N, device=selector.device, dtype=torch.int64).view(1, N)
+        sel = selector.unsqueeze(1)  # [M, 1]
+        mask = (sel == cols)         # [M, N]
+        val_s = torch.scalar_tensor(val, dtype=dtype, device=selector.device)
+        bg_s  = torch.scalar_tensor(background_val, dtype=dtype, device=selector.device)
+        return torch.where(mask, val_s, bg_s)
+    # Replace the scatter operation with the pointwise equivalent
+    match.replace_by_example(repl_fn, [shape, background_val, dim, selector, val])

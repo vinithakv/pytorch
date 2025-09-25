@@ -749,7 +749,7 @@ def is_valid_mm_plus_mm(match: Match):
 
     return True
 
-
+"""
 def scatter_upon_const_tensor_extra_check(m):
     if not config.optimize_scatter_upon_const_tensor:
         return False
@@ -830,7 +830,7 @@ def scatter_upon_const_tensor(
         inner_fn=inner_fn,
         ranges=shape,
     )
-
+"""
 
 @register_lowering_pattern(
     CallFunction(
