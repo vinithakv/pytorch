@@ -1002,6 +1002,7 @@ def scatter_upon_const_tensor_extra_check(m):
         KeywordArg("selector"),
         KeywordArg("val"),  # scalar value
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
     extra_check=scatter_upon_const_tensor_extra_check,
 )
@@ -1040,4 +1041,5 @@ def scatter_upon_const_tensor(
         return torch.where(mask, val, background_val)
 
     # replace the scatter operation with pointwise equivalent
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl_fn, [shape, background_val, dim, selector, val])
