@@ -8100,12 +8100,12 @@ class FallbackKernel(ExternKernelAlloc):
             )
         else:
             wrapper.generate_fallback_kernel(self)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
-                self.codegen_alignment_asserts(wrapper)
-                self.codegen_memory_tracking(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
+        if not self.use_runtime_dispatch and isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
+            self.codegen_memory_tracking(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor) -> FixedLayout:
